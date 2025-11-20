@@ -6,6 +6,7 @@ from .base import (
     get_dispersion_method,
     register_dispersion_method,
 )
+from . import mspac as _mspac  # noqa: F401  # ensure MSPAC registers itself
 
 __all__ = [
     "DispersionMethod",
