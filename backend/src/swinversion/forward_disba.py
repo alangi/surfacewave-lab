@@ -40,11 +40,18 @@ class DisbaForwardSolver(ForwardSolver):
         if np.any(freqs <= 0):
             raise ValueError("Frequencies must be positive to compute periods")
         periods = 1.0 / freqs
+        order = np.argsort(periods)  # disba requires sorted periods
+        periods_sorted = periods[order]
 
-        solver = PhaseDispersion(thickness=thickness, vp=vp, vs=vs, rho=rho, algorithm=self.algorithm)
-        result = solver(periods=periods, mode=mode, wave="rayleigh")
-        # result.c is in km/s; convert back to m/s
-        return np.asarray(result.c) * 1000.0
+        # disba expects positional args: thickness, vp, vs, rho
+        solver = PhaseDispersion(thickness, vp, vs, rho, algorithm=self.algorithm)
+        result = solver(periods_sorted, mode=mode, wave="rayleigh")
+        # DispersionCurve stores velocity in km/s
+        c_sorted = np.asarray(result.velocity) * 1000.0  # km/s -> m/s
+
+        # Reorder to match original frequency order
+        inv_order = np.argsort(order)
+        return c_sorted[inv_order]
 
 
 register_forward_solver(DisbaForwardSolver())
