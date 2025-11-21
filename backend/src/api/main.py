@@ -10,9 +10,14 @@ from obspy import read
 from swmam.base import get_dispersion_method
 from swmam.geometry import MamArrayGeometry
 from swmam.timeseries import MamTimeSeries
+from swinversion.forward_base import get_forward_solver
+from swinversion.model import LayerParamBounds, ModelParametrization
+from swinversion.search_base import get_global_search
+from swinversion.search_na import NAConfig
 
 from .schemas import (
     FileUploadResponse,
+    InversionRequest,
     JobInfo,
     JobStatusEnum,
     JobSubmitResponse,
@@ -111,6 +116,71 @@ def run_mam_job(job_id: str, request: MamProcessingRequest) -> None:
         out_path = RESULT_ROOT / f"{job_id}_mam.json"
         out_path.write_text(json.dumps(result.to_dict()))
 
+        update_job(job_id, status=JobStatusEnum.done, result={"result_path": str(out_path)})
+    except Exception as exc:  # pragma: no cover - defensive background task logging
+        update_job(job_id, status=JobStatusEnum.error, message=str(exc))
+
+
+@app.post("/inversion", response_model=JobSubmitResponse)
+async def submit_inversion(
+    request: InversionRequest, background_tasks: BackgroundTasks
+) -> JobSubmitResponse:
+    job = create_job("INVERSION")
+    background_tasks.add_task(run_inversion_job, job.job_id, request)
+    return JobSubmitResponse(job_id=job.job_id, status=job.status)
+
+
+def _load_dispersion(path: Path) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    data = json.loads(path.read_text())
+    freq = np.asarray(data["frequency"], dtype=float)
+    c = np.asarray(data["phase_velocity"], dtype=float)
+    unc = data.get("uncertainty")
+    sigma = np.asarray(unc if unc is not None else np.ones_like(c), dtype=float)
+    return freq, c, sigma
+
+
+def _build_param(param_data: dict[str, Any]) -> ModelParametrization:
+    layer_bounds_data = param_data.get("layer_bounds", [])
+    bounds = [LayerParamBounds(**lb) for lb in layer_bounds_data]
+    return ModelParametrization(nlayers=param_data["nlayers"], layer_bounds=bounds)
+
+
+def run_inversion_job(job_id: str, request: InversionRequest) -> None:
+    try:
+        update_job(job_id, status=JobStatusEnum.running)
+
+        disp_path = RESULT_ROOT / request.dispersion_file_id
+        if not disp_path.exists():
+            raise FileNotFoundError(f"dispersion file {disp_path} not found")
+
+        freq, c_obs, sigma_obs = _load_dispersion(disp_path)
+
+        param = _build_param(request.parametrization)
+        param.validate()
+
+        solver = get_forward_solver(request.forward_solver)
+        search = get_global_search(request.search_method)
+
+        search_cfg = request.search_config
+        if search.name.lower() == "na":
+            search_cfg = NAConfig(**request.search_config)
+
+        ensemble = search.run(param, freq, c_obs, sigma_obs, solver, search_cfg)
+        best_model = ensemble.best_model()
+        h, vp, vs, rho = best_model.as_arrays()
+        result_data = {
+            "best_misfit": ensemble.best_misfit(),
+            "best_model": {
+                "h": h.tolist(),
+                "vp": vp.tolist(),
+                "vs": vs.tolist(),
+                "rho": rho.tolist(),
+            },
+            "n_models": len(ensemble.models),
+        }
+
+        out_path = RESULT_ROOT / f"{job_id}_inv.json"
+        out_path.write_text(json.dumps(result_data))
         update_job(job_id, status=JobStatusEnum.done, result={"result_path": str(out_path)})
     except Exception as exc:  # pragma: no cover - defensive background task logging
         update_job(job_id, status=JobStatusEnum.error, message=str(exc))
