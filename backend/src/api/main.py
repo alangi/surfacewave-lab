@@ -4,7 +4,7 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
-from fastapi import BackgroundTasks, FastAPI, File, UploadFile
+from fastapi import BackgroundTasks, FastAPI, File, UploadFile, HTTPException
 from obspy import read
 
 from swmam.base import get_dispersion_method
@@ -20,6 +20,7 @@ from .schemas import (
     InversionRequest,
     JobInfo,
     JobStatusEnum,
+    JobStatusResponse,
     JobSubmitResponse,
     MamProcessingRequest,
 )
@@ -119,6 +120,13 @@ def run_mam_job(job_id: str, request: MamProcessingRequest) -> None:
         update_job(job_id, status=JobStatusEnum.done, result={"result_path": str(out_path)})
     except Exception as exc:  # pragma: no cover - defensive background task logging
         update_job(job_id, status=JobStatusEnum.error, message=str(exc))
+
+
+@app.get("/jobs/{job_id}", response_model=JobStatusResponse)
+async def get_job_status(job_id: str) -> JobStatusResponse:
+    if job_id not in JOBS:
+        raise HTTPException(status_code=404, detail=f"Job {job_id} not found")
+    return JobStatusResponse(job=JOBS[job_id])
 
 
 @app.post("/inversion", response_model=JobSubmitResponse)
