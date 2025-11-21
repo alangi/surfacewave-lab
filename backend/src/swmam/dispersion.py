@@ -14,6 +14,17 @@ class MamDispersionResult:
     uncertainty: np.ndarray | None = None
     meta: dict[str, Any] = field(default_factory=dict)
 
+    @staticmethod
+    def _json_safe(value: Any) -> Any:
+        """Recursively convert numpy types to JSON-serializable Python types."""
+        if isinstance(value, np.ndarray):
+            return value.tolist()
+        if isinstance(value, (list, tuple)):
+            return [MamDispersionResult._json_safe(v) for v in value]
+        if isinstance(value, dict):
+            return {k: MamDispersionResult._json_safe(v) for k, v in value.items()}
+        return value
+
     def validate(self) -> None:
         """Validate arrays are 1D and matching length."""
         if self.frequency.ndim != 1 or self.phase_velocity.ndim != 1:
@@ -30,10 +41,10 @@ class MamDispersionResult:
         """Convert to JSON-safe dictionary."""
         return {
             "method": self.method,
-            "frequency": self.frequency.tolist(),
-            "phase_velocity": self.phase_velocity.tolist(),
-            "uncertainty": None if self.uncertainty is None else self.uncertainty.tolist(),
-            "meta": dict(self.meta),
+            "frequency": np.asarray(self.frequency).tolist(),
+            "phase_velocity": np.asarray(self.phase_velocity).tolist(),
+            "uncertainty": None if self.uncertainty is None else np.asarray(self.uncertainty).tolist(),
+            "meta": MamDispersionResult._json_safe(self.meta),
         }
 
     @classmethod
