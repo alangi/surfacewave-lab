@@ -16,6 +16,7 @@ dependencies = [
   "pydantic",
   "obspy",
   "disba",
+  "pandas",
 ]
 
 [project.optional-dependencies]
@@ -23,6 +24,7 @@ dev = [
   "pytest",
   "black",
   "ruff",
+  "httpx",
 ]
 
 [tool.hatch.build.targets.wheel]

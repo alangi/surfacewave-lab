@@ -36,6 +36,12 @@ class MamProcessingRequest(BaseModel):
     file_id: str
     method: str
     config: dict[str, Any]
+    geometry_id: str  # reference to uploaded geometry CSV
+
+
+class GeometryUploadResponse(BaseModel):
+    geometry_id: str
+    filename: str
 
 
 class InversionRequest(BaseModel):

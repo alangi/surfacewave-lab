@@ -4,11 +4,11 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
-from fastapi import BackgroundTasks, FastAPI, File, UploadFile, HTTPException
+from fastapi import BackgroundTasks, FastAPI, File, HTTPException, UploadFile
 from obspy import read
 
 from swmam.base import get_dispersion_method
-from swmam.geometry import MamArrayGeometry
+from swmam.geometry_io import load_geometry_from_csv
 from swmam.timeseries import MamTimeSeries
 from swinversion.forward_base import get_forward_solver
 from swinversion.model import LayerParamBounds, ModelParametrization
@@ -17,6 +17,7 @@ from swinversion.search_na import NAConfig
 
 from .schemas import (
     FileUploadResponse,
+    GeometryUploadResponse,
     InversionRequest,
     JobInfo,
     JobStatusEnum,
@@ -29,10 +30,13 @@ app = FastAPI()
 
 # In-memory job registry. Replace with persistent storage in production.
 JOBS: dict[str, JobInfo] = {}
-UPLOAD_ROOT = Path(__file__).resolve().parent.parent / "uploads"
-RESULT_ROOT = Path(__file__).resolve().parent.parent / "results"
+DATA_ROOT = Path(__file__).resolve().parent.parent
+UPLOAD_ROOT = DATA_ROOT / "uploads"
+RESULT_ROOT = DATA_ROOT / "results"
+GEOMETRY_ROOT = DATA_ROOT / "geometry"
 UPLOAD_ROOT.mkdir(parents=True, exist_ok=True)
 RESULT_ROOT.mkdir(parents=True, exist_ok=True)
+GEOMETRY_ROOT.mkdir(parents=True, exist_ok=True)
 
 
 def create_job(job_type: str, initial_status: JobStatusEnum = JobStatusEnum.pending) -> JobInfo:
@@ -66,6 +70,22 @@ async def upload_file(file: UploadFile = File(...)) -> FileUploadResponse:
     return FileUploadResponse(file_id=file_id)
 
 
+@app.post("/geometry/upload", response_model=GeometryUploadResponse)
+async def upload_geometry_csv(file: UploadFile = File(...)) -> GeometryUploadResponse:
+    """
+    Upload a geometry CSV file and return a geometry_id.
+    """
+    geometry_id = str(uuid.uuid4())
+    dest_dir = GEOMETRY_ROOT / geometry_id
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    dest_path = dest_dir / file.filename
+
+    content = await file.read()
+    dest_path.write_bytes(content)
+
+    return GeometryUploadResponse(geometry_id=geometry_id, filename=file.filename)
+
+
 @app.post("/mam/dispersion", response_model=JobSubmitResponse)
 async def submit_mam_dispersion(
     request: MamProcessingRequest, background_tasks: BackgroundTasks
@@ -87,23 +107,31 @@ def run_mam_job(job_id: str, request: MamProcessingRequest) -> None:
             raise FileNotFoundError(f"No files found for file_id {request.file_id}")
         file_path = files[0]
 
+        geom_dir = GEOMETRY_ROOT / request.geometry_id
+        if not geom_dir.exists():
+            raise FileNotFoundError(f"geometry_id {request.geometry_id} not found")
+        geom_files = [p for p in geom_dir.iterdir() if p.is_file() and p.suffix.lower() == ".csv"]
+        if not geom_files:
+            raise FileNotFoundError(f"No geometry CSV found for geometry_id {request.geometry_id}")
+        geom_path = geom_files[0]
+
         stream = read(str(file_path))
         if len(stream) == 0:
             raise ValueError("No traces in uploaded file")
 
-        n_samples = min(len(tr) for tr in stream)
-        data = np.stack([tr.data[:n_samples] for tr in stream]).astype(float)
+        geom = load_geometry_from_csv(geom_path)
+
+        # Map stream traces to geometry station order
+        stream_map = {tr.stats.station: tr for tr in stream}
+        missing = [sid for sid in geom.station_ids if sid not in stream_map]
+        if missing:
+            raise ValueError(f"Stations missing in waveform data: {', '.join(missing)}")
+
+        n_samples = min(len(stream_map[sid]) for sid in geom.station_ids)
+        data = np.stack([stream_map[sid].data[:n_samples] for sid in geom.station_ids]).astype(float)
         data = data.reshape(1, data.shape[0], data.shape[1])
 
-        dt = stream[0].stats.delta
-        station_ids = [tr.stats.station or f"ST{i}" for i, tr in enumerate(stream)]
-        coords = np.zeros((len(station_ids), 2))
-
-        ts = MamTimeSeries(data=data, dt=dt)
-        ts.validate()
-
-        geom = MamArrayGeometry(station_ids=station_ids, coords_xy=coords)
-        geom.validate()
+        dt = stream_map[geom.station_ids[0]].stats.delta
 
         method = get_dispersion_method(request.method)
         cfg = request.config
