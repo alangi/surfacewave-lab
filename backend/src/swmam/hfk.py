@@ -103,6 +103,7 @@ class HFKMethod(DispersionMethod):
         uncertainty = np.full(freq.shape, np.nan, dtype=float)
 
         eye_n = np.eye(n_stations, dtype=complex)
+        two_pi = 2.0 * np.pi
 
         for i_f, f in enumerate(freq):
             if f <= 0:
@@ -110,19 +111,22 @@ class HFKMethod(DispersionMethod):
             S = S_accum[i_f]
             power_trace = np.trace(S).real / n_stations
             S_reg = S + config.diagonal_loading * power_trace * eye_n
+            try:
+                S_inv = np.linalg.inv(S_reg)
+            except np.linalg.LinAlgError:
+                continue
 
+            delays = x_proj[:, None] / v_grid[None, :]
+            a = np.exp(-1j * two_pi * f * delays)  # shape (n_stations, n_vel)
+
+            denom = np.einsum("vi,ij,jv->v", a.conj().T, S_inv, a, optimize=True)
+            denom_real = np.real(denom)
             powers = np.full(v_grid.shape, -np.inf, dtype=float)
-            for i_v, v in enumerate(v_grid):
-                delays = x_proj / v
-                a = np.exp(-1j * 2.0 * np.pi * f * delays)
-                try:
-                    w = np.linalg.solve(S_reg, a)
-                    denom = np.conj(a) @ w
-                    if np.isfinite(denom) and denom != 0:
-                        P = 1.0 / denom
-                        powers[i_v] = np.real(P)
-                except np.linalg.LinAlgError:
-                    powers[i_v] = -np.inf
+            valid = np.isfinite(denom_real) & (denom_real != 0)
+            powers[valid] = 1.0 / denom_real[valid]
+
+            if not np.any(np.isfinite(powers)):
+                continue
 
             best_idx = int(np.argmax(powers))
             phase_velocity[i_f] = v_grid[best_idx]
