@@ -1,0 +1,5 @@
+# Python virtual envs
+.venv/
+
+# Local geometry CSV samples
+backend/*.csv

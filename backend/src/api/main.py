@@ -1,5 +1,6 @@
 import json
 import uuid
+import zipfile
 from pathlib import Path
 from typing import Any
 
@@ -57,17 +58,54 @@ def update_job(job_id: str, **fields: Any) -> JobInfo:
     return updated
 
 
+def _is_zip_upload(upload_file: UploadFile) -> bool:
+    content_type = (upload_file.content_type or "").lower()
+    filename = (upload_file.filename or "").lower()
+    return filename.endswith(".zip") or content_type in {"application/zip", "application/x-zip-compressed"}
+
+
+def load_dataset_stream(dataset_dir: Path):
+    files = [p for p in dataset_dir.iterdir() if p.is_file()]
+    if not files:
+        raise FileNotFoundError(f"No files found in dataset directory {dataset_dir}")
+    stream = read(str(dataset_dir / "*"))
+    if len(stream) == 0:
+        raise ValueError("No traces in uploaded dataset")
+    return stream
+
+
 @app.post("/upload", response_model=FileUploadResponse)
-async def upload_file(file: UploadFile = File(...)) -> FileUploadResponse:
+async def upload_file(files: list[UploadFile] = File(...)) -> FileUploadResponse:
+    if not files:
+        raise HTTPException(status_code=400, detail="No files uploaded")
+
     file_id = str(uuid.uuid4())
     dest_dir = UPLOAD_ROOT / file_id
     dest_dir.mkdir(parents=True, exist_ok=True)
-    dest_path = dest_dir / file.filename
 
-    content = await file.read()
-    dest_path.write_bytes(content)
+    is_single_zip = len(files) == 1 and _is_zip_upload(files[0])
+    filenames: list[str] = []
 
-    return FileUploadResponse(file_id=file_id)
+    for upload_file in files:
+        dest_path = dest_dir / upload_file.filename
+        content = await upload_file.read()
+        dest_path.write_bytes(content)
+        filenames.append(upload_file.filename)
+
+    if is_single_zip:
+        zip_path = dest_dir / files[0].filename
+        with zipfile.ZipFile(zip_path, "r") as zip_ref:
+            extracted_files = [info.filename for info in zip_ref.infolist() if not info.is_dir()]
+            zip_ref.extractall(dest_dir)
+        try:
+            zip_path.unlink()
+        except OSError:
+            pass
+        if not extracted_files:
+            raise HTTPException(status_code=400, detail="ZIP file contains no files")
+        filenames = extracted_files
+
+    return FileUploadResponse(file_id=file_id, filenames=filenames)
 
 
 @app.post("/geometry/upload", response_model=GeometryUploadResponse)
@@ -99,13 +137,10 @@ def run_mam_job(job_id: str, request: MamProcessingRequest) -> None:
     try:
         update_job(job_id, status=JobStatusEnum.running)
 
-        file_dir = UPLOAD_ROOT / request.file_id
-        if not file_dir.exists():
+        dataset_dir = UPLOAD_ROOT / request.file_id
+        if not dataset_dir.exists():
             raise FileNotFoundError(f"file_id {request.file_id} not found")
-        files = [p for p in file_dir.iterdir() if p.is_file()]
-        if not files:
-            raise FileNotFoundError(f"No files found for file_id {request.file_id}")
-        file_path = files[0]
+        stream = load_dataset_stream(dataset_dir)
 
         geom_dir = GEOMETRY_ROOT / request.geometry_id
         if not geom_dir.exists():
@@ -114,10 +149,6 @@ def run_mam_job(job_id: str, request: MamProcessingRequest) -> None:
         if not geom_files:
             raise FileNotFoundError(f"No geometry CSV found for geometry_id {request.geometry_id}")
         geom_path = geom_files[0]
-
-        stream = read(str(file_path))
-        if len(stream) == 0:
-            raise ValueError("No traces in uploaded file")
 
         geom = load_geometry_from_csv(geom_path)
 
@@ -132,6 +163,8 @@ def run_mam_job(job_id: str, request: MamProcessingRequest) -> None:
         data = data.reshape(1, data.shape[0], data.shape[1])
 
         dt = stream_map[geom.station_ids[0]].stats.delta
+        ts = MamTimeSeries(data=data, dt=dt)
+        ts.validate()
 
         method = get_dispersion_method(request.method)
         cfg = request.config

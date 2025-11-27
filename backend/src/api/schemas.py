@@ -30,6 +30,7 @@ class JobStatusResponse(BaseModel):
 
 class FileUploadResponse(BaseModel):
     file_id: str
+    filenames: list[str]
 
 
 class MamProcessingRequest(BaseModel):
