@@ -74,25 +74,33 @@ class MSPACMethod(DispersionMethod):
         n_freq = freq.size
         rho_sum = np.zeros((config.n_radii, n_freq))
         rho_count = np.zeros((config.n_radii, n_freq), dtype=int)
+        sum_cross = np.zeros((n_stations, n_stations, n_freq), dtype=complex)
+        sum_auto = np.zeros((n_stations, n_freq), dtype=float)
 
         for start, end in windows:
             segment = data_z[:, start:end]
             spec = np.fft.rfft(segment, axis=1)
             auto = np.abs(spec) ** 2
+            sum_cross += spec[:, None, :] * np.conj(spec[None, :, :])
+            sum_auto += auto
 
-            for i in range(n_stations):
-                for j in range(i + 1, n_stations):
-                    dist = dist_mat[i, j]
-                    bin_idx = np.searchsorted(bin_edges, dist, side="right") - 1
-                    if bin_idx < 0 or bin_idx >= config.n_radii:
-                        continue
+        n_windows = len(windows)
+        avg_cross = sum_cross / n_windows
+        avg_auto = sum_auto / n_windows
 
-                    denom = np.sqrt(auto[i] * auto[j])
-                    with np.errstate(divide="ignore", invalid="ignore"):
-                        spac_pair = np.real(spec[i] * np.conj(spec[j]) / denom)
-                    spac_pair = np.nan_to_num(spac_pair)
-                    rho_sum[bin_idx] += spac_pair
-                    rho_count[bin_idx] += 1
+        with np.errstate(divide="ignore", invalid="ignore"):
+            denom = np.sqrt(avg_auto[:, None, :] * avg_auto[None, :, :])
+            rho_pairs = np.real(avg_cross / denom)
+        rho_pairs = np.nan_to_num(rho_pairs)
+
+        for i in range(n_stations):
+            for j in range(i + 1, n_stations):
+                dist = dist_mat[i, j]
+                bin_idx = np.searchsorted(bin_edges, dist, side="right") - 1
+                if bin_idx < 0 or bin_idx >= config.n_radii:
+                    continue
+                rho_sum[bin_idx] += rho_pairs[i, j]
+                rho_count[bin_idx] += 1
 
         # Average rho over pairs/windows.
         rho = np.zeros_like(rho_sum)
