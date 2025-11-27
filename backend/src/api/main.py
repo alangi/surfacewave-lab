@@ -6,6 +6,7 @@ from typing import Any
 
 import numpy as np
 from fastapi import BackgroundTasks, FastAPI, File, HTTPException, UploadFile
+from fastapi.responses import HTMLResponse
 from obspy import read
 
 from swmam.base import get_dispersion_method
@@ -73,6 +74,24 @@ def load_dataset_stream(dataset_dir: Path):
     if len(stream) == 0:
         raise ValueError("No traces in uploaded dataset")
     return stream
+
+
+@app.get("/", response_class=HTMLResponse)
+async def upload_form():
+    # Simple helper UI to allow selecting multiple waveform files at once.
+    return """
+    <html>
+      <body>
+        <h2>Upload waveform dataset</h2>
+        <p>Select one or more MiniSEED/SEG2/SEGY files, or a single ZIP containing them.</p>
+        <form action="/upload" method="post" enctype="multipart/form-data">
+          <input type="file" name="files" multiple />
+          <button type="submit">Upload</button>
+        </form>
+        <p>After uploading, note the returned <code>file_id</code> to use with geometry and processing.</p>
+      </body>
+    </html>
+    """
 
 
 @app.post("/upload", response_model=FileUploadResponse)
