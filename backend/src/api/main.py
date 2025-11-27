@@ -159,6 +159,10 @@ def run_mam_job(job_id: str, request: MamProcessingRequest) -> None:
         if missing:
             raise ValueError(f"Stations missing in waveform data: {', '.join(missing)}")
 
+        deltas = [stream_map[sid].stats.delta for sid in geom.station_ids]
+        if not all(np.isclose(d, deltas[0]) for d in deltas):
+            raise ValueError("Sampling intervals differ across stations; please upload data with consistent sampling")
+
         n_samples = min(len(stream_map[sid]) for sid in geom.station_ids)
         data = np.stack([stream_map[sid].data[:n_samples] for sid in geom.station_ids]).astype(float)
         data = data.reshape(1, data.shape[0], data.shape[1])
