@@ -122,7 +122,7 @@ class HFKMethod(DispersionMethod):
             denom = np.einsum("vi,ij,jv->v", a.conj().T, S_inv, a, optimize=True)
             denom_real = np.real(denom)
             powers = np.full(v_grid.shape, -np.inf, dtype=float)
-            valid = np.isfinite(denom_real) & (denom_real != 0)
+            valid = np.isfinite(denom_real) & (denom_real > 0.0)
             powers[valid] = 1.0 / denom_real[valid]
 
             if not np.any(np.isfinite(powers)):
