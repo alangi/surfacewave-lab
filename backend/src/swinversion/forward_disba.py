@@ -23,6 +23,7 @@ def model_to_disba_arrays(model: VsModel) -> tuple[np.ndarray, np.ndarray, np.nd
     vp_kms = vp_mps / 1000.0
     vs_kms = vs_mps / 1000.0
     rho_gcc = rho / 1000.0  # convert kg/m^3 to g/cc
+    thickness_km = np.maximum(thickness_km, 0.001)
     return thickness_km, vp_kms, vs_kms, rho_gcc
 
 

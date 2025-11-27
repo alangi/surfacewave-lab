@@ -9,8 +9,8 @@ class LayerParamBounds:
 
     vs_min: float
     vs_max: float
-    h_min: float
     h_max: float
+    h_min: float = 0.5
     vp_vs_min: float = 1.6
     vp_vs_max: float = 2.0
     rho_min: float = 1800.0
