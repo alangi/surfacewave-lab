@@ -3,3 +3,6 @@
 
 # Local geometry CSV samples
 backend/*.csv
+
+# Pytest temp directory
+backend/.pytest_tmp/

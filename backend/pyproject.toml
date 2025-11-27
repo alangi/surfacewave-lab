@@ -29,3 +29,6 @@ dev = [
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/swmam", "src/swinversion"]
+
+[tool.pytest.ini_options]
+addopts = ["--basetemp=./.pytest_tmp"]
