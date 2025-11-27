@@ -89,6 +89,48 @@ async def upload_form():
           <button type="submit">Upload</button>
         </form>
         <p>After uploading, note the returned <code>file_id</code> to use with geometry and processing.</p>
+
+        <hr />
+
+        <h2>Upload geometry CSV</h2>
+        <p>Upload the geometry (station coordinates) matching the waveform dataset you will process.</p>
+        <form action="/geometry/upload" method="post" enctype="multipart/form-data">
+          <input type="file" name="file" accept=".csv" />
+          <button type="submit">Upload Geometry</button>
+        </form>
+        <p>The response returns a <code>geometry_id</code>. Keep it paired with the corresponding <code>file_id</code>.</p>
+
+        <hr />
+
+        <h2>Submit MAM dispersion job</h2>
+        <p>Provide the <code>file_id</code> from the waveform upload and the matching <code>geometry_id</code> from the geometry upload.</p>
+        <form id="dispersion-form">
+          <label>file_id: <input type="text" id="file_id" required /></label><br />
+          <label>geometry_id: <input type="text" id="geometry_id" required /></label><br />
+          <label>method: <input type="text" id="method" value="mspac" /></label><br />
+          <label>config (JSON): <textarea id="config" rows="6" cols="60">{ "fmin": 0.1, "fmax": 10.0, "df": 0.1, "vmin": 50, "vmax": 1000, "dv": 10, "n_radii": 8 }</textarea></label><br />
+          <button type="button" onclick="submitJob()">Submit</button>
+        </form>
+        <pre id="job-result"></pre>
+
+        <script>
+          async function submitJob() {
+            const payload = {
+              file_id: document.getElementById('file_id').value,
+              geometry_id: document.getElementById('geometry_id').value,
+              method: document.getElementById('method').value,
+              config: JSON.parse(document.getElementById('config').value || "{}")
+            };
+            const resp = await fetch('/mam/dispersion', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(payload)
+            });
+            document.getElementById('job-result').textContent = await resp.text();
+          }
+        </script>
+
+        <p><strong>Tip:</strong> If you manage multiple datasets/locations, keep a small log mapping each <code>file_id</code> to its correct <code>geometry_id</code> before submitting jobs.</p>
       </body>
     </html>
     """
