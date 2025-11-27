@@ -3,7 +3,7 @@ from dataclasses import dataclass
 import numpy as np
 
 
-@dataclass
+@dataclass(kw_only=True)
 class LayerParamBounds:
     """Bounds for inversion layer parameters."""
 
