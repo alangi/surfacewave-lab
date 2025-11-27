@@ -65,10 +65,11 @@ def _is_zip_upload(upload_file: UploadFile) -> bool:
 
 
 def load_dataset_stream(dataset_dir: Path):
-    files = [p for p in dataset_dir.iterdir() if p.is_file()]
+    valid_exts = {".mseed", ".sgy", ".sg2", ".segy"}
+    files = [p for p in dataset_dir.iterdir() if p.is_file() and p.suffix.lower() in valid_exts]
     if not files:
-        raise FileNotFoundError(f"No files found in dataset directory {dataset_dir}")
-    stream = read(str(dataset_dir / "*"))
+        raise HTTPException(status_code=400, detail="No supported waveform files found for dataset")
+    stream = read([str(p) for p in files])
     if len(stream) == 0:
         raise ValueError("No traces in uploaded dataset")
     return stream
