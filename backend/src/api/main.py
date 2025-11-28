@@ -1,6 +1,7 @@
 import json
 import uuid
 import zipfile
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -244,8 +245,38 @@ def run_mam_job(job_id: str, request: MamProcessingRequest) -> None:
         result = method.estimate(ts, geom, cfg)
         result.validate()
 
+        # Resample to requested band/grid if provided (helps keep output compact)
+        f_out = np.asarray(result.frequency, dtype=float)
+        c_out = np.asarray(result.phase_velocity, dtype=float)
+        u_out = np.asarray(result.uncertainty, dtype=float)
+        if all(hasattr(cfg, attr) for attr in ("fmin", "fmax", "df")):
+            target_f = np.arange(cfg.fmin, cfg.fmax + cfg.df * 0.5, cfg.df, dtype=float)
+            mask = np.isfinite(f_out) & np.isfinite(c_out)
+            if mask.any():
+                c_interp = np.interp(target_f, f_out[mask], c_out[mask], left=np.nan, right=np.nan)
+                u_interp = np.interp(target_f, f_out[mask], u_out[mask], left=np.nan, right=np.nan)
+                result.frequency = target_f
+                result.phase_velocity = c_interp
+                result.uncertainty = u_interp
+
+        # Write a swprocess-compatible payload alongside the default output
+        timestamp_key = datetime.utcnow().strftime("%Y%m%d%H%M%S.%f")
+        swprocess_payload = {
+            timestamp_key: {
+                "frequency": [result.frequency.tolist()],
+                "velocity": [result.phase_velocity.tolist()],
+                "azimuth": [[]],
+                "ellipticity": [[]],
+                "noise": [[]],
+                "power": [[]],
+                "valid": [[True for _ in result.frequency]],
+            }
+        }
+
         out_path = RESULT_ROOT / f"{job_id}_mam.json"
         out_path.write_text(json.dumps(result.to_dict()))
+        swprocess_path = RESULT_ROOT / f"{job_id}_mam_swprocess.json"
+        swprocess_path.write_text(json.dumps(swprocess_payload))
 
         update_job(job_id, status=JobStatusEnum.done, result={"result_path": str(out_path)})
     except Exception as exc:  # pragma: no cover - defensive background task logging
